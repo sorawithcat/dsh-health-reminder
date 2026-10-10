@@ -17,7 +17,7 @@ export const inject = ["webServer"];
 const STATUS_PATH = "/health-reminder/status";
 
 /** 版本号；测试会拿它和 package.json 比对，两边必须一致。 */
-const VERSION = "0.5.1";
+const VERSION = "0.5.2";
 
 /**
  * 回一个 JSON 响应。

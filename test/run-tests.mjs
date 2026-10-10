@@ -741,6 +741,34 @@ check("applyPlan 把方案写进设置并重排下一次", () => {
 	assert.equal(t.isAllowed(state.settings, at), true, "派生出来的时间必须落在允许时段内");
 });
 
+check("applyPlan 原样套用方案：方案记的是「关着提醒」，应用它不该把总开关打开", () => {
+	resetStore();
+	t.applyPlan({ settings: t.normalizeSettings({ ...t.DEFAULT_SETTINGS, enabled: false, workdays: [1, 2, 3, 4, 5] }) });
+	assert.equal(t.store.get().settings.enabled, false, "应用方案不能偷偷打开总开关");
+
+	// 编辑当前方案保存走的是同一条 applyPlan 路径，也不能把开关打开。
+	const id = t.savePlan("关着提醒的方案", null);
+	assert.equal(t.planById(t.store.get(), id).settings.enabled, false, "快照记下的就是关着的状态");
+	t.applyPlanById(id);
+	assert.equal(t.store.get().settings.enabled, false);
+
+	// 反向也要成立：方案存的是开着，应用后就开着。
+	t.updateSettings({ enabled: true });
+	t.savePlan("开着提醒的方案", null);
+	t.applyPlanById(id);
+	assert.equal(t.store.get().settings.enabled, false, "切回关着的那份，开关跟着回去");
+});
+
+check("方案名上限和落库一致（PLAN_NAME_MAX）：不先让用户打到 40 再无声截到 24", () => {
+	resetStore();
+	const id = t.savePlan("工作日上午", null);
+	assert.equal(t.openPlanEditor(id), true);
+	t.patchPlanEditor({ name: "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十" });
+	assert.equal(t.planEditorOf().name.length, t.PLAN_NAME_MAX);
+	assert.equal(t.savePlanEditor(), true);
+	assert.equal(t.planById(t.store.get(), id).name.length, t.PLAN_NAME_MAX, "落库时的名字也不该比输入更长");
+});
+
 check("reminderCopy 带统计信息", () => {
 	resetStore();
 	const copy = t.reminderCopy("water", ms(1, 10, 30));
@@ -1550,6 +1578,69 @@ check("方案页的「编辑」弹窗：改完保存写回方案，取消不动"
 	assert.equal(t.planById(t.store.get(), planId).settings.kinds.water.intervalMin, 25, "取消后方案保持原样");
 	assert.equal(/编辑「/.test(renderRoot(overlay, {}).text), false, "取消后弹窗消失");
 	assert.equal(t.store.get().plans.length, 1, "编辑不会多出方案");
+});
+
+check("浮层席位缺席时，方案编辑弹窗改挂在面板里（不会点了没反应）", () => {
+	resetStore();
+	const panel = registrations.find((item) => item.slotName === "main").out.component;
+	const planId = t.savePlan("测试方案", null);
+
+	// 外壳完整：shell.overlay 席位可用 → 弹窗只挂浮层那一份。
+	const before = effectFns.length;
+	mod.apply(fakeCtx);
+	assert.equal(effectFns.length - before, 3, "apply 应注册三个 effect");
+	t.openPlanEditor(planId);
+	hookState.set("HealthPanelPage#2", "plans");
+	assert.equal(/编辑「测试方案」/.test(renderRoot(panel, {}, true).text), false, "浮层可用时面板不重复挂弹窗");
+
+	// 外壳撤销 / 没声明 shell.overlay：走「界面挂载」effect 的清理，浮层席位不再可用。
+	const stopUi = effectFns[before]();
+	assert.equal(typeof stopUi, "function");
+	stopUi();
+	assert.match(renderRoot(panel, {}, true).text, /编辑「测试方案」/, "浮层席位缺席时，面板里也要能弹出编辑弹窗");
+	click(renderRoot(panel, {}, true), "取消");
+	assert.equal(t.planEditorOf(), null, "面板里那份弹窗也要能取消");
+});
+
+check("「测试系统通知」有反馈：权限没拿到 / 环境不支持都会说出原因", () => {
+	resetStore();
+	hookState.set("HealthPanelPage#2", "settings");
+	const panel = registrations.find((item) => item.slotName === "main").out.component;
+	const tree = renderRoot(panel, {}, true);
+	const button = tree.elements.find((node) => node.type === "button" && flatText(node.props?.children).includes("测试系统通知"));
+	assert.ok(button, "设置页应有「测试系统通知」按钮");
+	button.props.onClick();
+	assert.match(renderRoot(panel, {}, true).text, /不支持系统通知/, "点了要有一句人话，不能静默什么都不发生");
+
+	// 有 Notification 且已授权 → 真发一条；被拒 → 明确告诉用户是权限问题。
+	const notes = [];
+	const original = globalThis.Notification;
+	globalThis.Notification = function (title, options) {
+		notes.push({ title, options });
+	};
+	globalThis.Notification.permission = "granted";
+	assert.equal(t.notifySystem("water", Date.now()), "sent");
+	assert.equal(notes.length, 1, "授权后应真的构造一条通知");
+	assert.match(notes[0].title, /该喝水了/);
+	globalThis.Notification.permission = "denied";
+	assert.equal(t.notifySystem("water", Date.now()), "denied");
+	if (original === undefined) delete globalThis.Notification;
+	else globalThis.Notification = original;
+});
+
+check("每日目标输入框的上限就是它真正的上限（不给出会被无声裁剪的值）", () => {
+	resetStore();
+	t.updateSettings({ kinds: { ...t.store.get().settings.kinds, eyes: { ...t.store.get().settings.kinds.eyes, on: true } } });
+	hookState.set("HealthPanelPage#2", "settings");
+	const panel = registrations.find((item) => item.slotName === "main").out.component;
+	const tree = renderRoot(panel, {}, true);
+	const maxima = tree.elements.filter((node) => node.type === "input" && node.props?.type === "number").map((node) => node.props.max);
+	assert.ok(maxima.length >= 4, `每类提醒都要有数字输入框：${maxima.length}`);
+	assert.equal(maxima.includes(96), false, "96 是无意义的：归一化会按类型裁到 24 / 24 / 40 / 12");
+	assert.equal(maxima.filter((value) => value === 240).length, 4, "四类提醒的间隔上限都是 240");
+	assert.equal(maxima.filter((value) => value === 24).length, 2, "喝水 / 起身的目标上限是 24");
+	assert.equal(maxima.filter((value) => value === 40).length, 1, "护眼的目标上限是 40");
+	assert.equal(maxima.filter((value) => value === 12).length, 1, "拉伸的目标上限是 12");
 });
 
 check("面板可滚动：正文自己滚（外壳给的是定高容器）", () => {

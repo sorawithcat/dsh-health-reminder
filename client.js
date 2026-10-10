@@ -633,10 +633,14 @@ window.__ModuleLoader__.load({
 			return { kind, title: `${def.title} ${def.icon}`, body: pick(TIPS[def.id] ?? TIPS.water, seq), detail: detail.join(" · ") };
 		}
 
+		/**
+		 * 发一条系统通知；返回一句状态给调用处（"sent" / "unsupported" / "denied" / "error"），
+		 * 好让「测试系统通知」能在界面上说清楚为什么没反应。
+		 */
 		function notifySystem(kind, now) {
 			try {
-				if (typeof Notification === "undefined" || typeof Notification !== "function") return;
-				if (Notification.permission !== "granted") return;
+				if (typeof Notification === "undefined" || typeof Notification !== "function") return "unsupported";
+				if (Notification.permission !== "granted") return "denied";
 				const copy = reminderCopy(kind, now);
 				const note = new Notification(copy.title, {
 					body: `${copy.body}\n${copy.detail}`,
@@ -655,8 +659,10 @@ window.__ModuleLoader__.load({
 						console.warn("[health-reminder] 通知点击处理失败:", error);
 					}
 				};
+				return "sent";
 			} catch (error) {
 				console.warn("[health-reminder] 系统通知失败:", error);
+				return "error";
 			}
 		}
 
@@ -1250,11 +1256,17 @@ window.__ModuleLoader__.load({
 			return lines;
 		}
 
-		/** 一键套用方案（并立刻重排下一次提醒）。 */
+		/**
+		 * 一键套用方案（并立刻重排下一次提醒）。
+		 *
+		 * 方案里存的是完整设置快照，这里**原样**写回——包括总开关。刻意不强制打开提醒：
+		 * 如果这份方案是在关掉提醒时存下的，应用它就该保持关着；否则用户「应用」一下、
+		 * 或者编辑当前方案保存一下，关着的提醒会自己跳开。（开/关提醒在设置页和面板都有开关。）
+		 */
 		function applyPlan(plan) {
 			if (!plan || !plan.settings) return;
 			const state = store.get();
-			const settings = normalizeSettings({ ...plan.settings, enabled: true });
+			const settings = normalizeSettings({ ...plan.settings });
 			store.set({ ...state, settings, runtime: freshRuntime(Date.now()) });
 			ensureRuntimeNow(Date.now());
 		}
@@ -2048,7 +2060,16 @@ window.__ModuleLoader__.load({
 			const state = useAppState();
 			useNow(5000);
 			const settings = state.settings;
+			const [notifyNote, setNotifyNote] = useState("");
 			const permission = notificationPermission();
+			/** 点「测试系统通知」时给一句人话反馈：权限没拿到 / 环境不支持都不该是静默的。 */
+			const testNotify = () => {
+				const result = notifySystem("water", Date.now());
+				if (result === "sent") return "已发出系统通知（点通知会把窗口拉到前台并打开面板）。";
+				if (result === "unsupported") return "这个环境不支持系统通知，先用「测试提示音」或应用内提示卡。";
+				if (result === "denied") return notificationPermission() === "denied" ? "浏览器/系统拒绝了通知权限，得在那里放开；先用提示音或应用内提示卡。" : "还没拿到通知权限，先点「请求权限」。";
+				return "系统通知没发出去，插件没受影响，可以看控制台日志。";
+			};
 			const toggleDay = (iso) => {
 				const has = settings.workdays.includes(iso);
 				const next = has ? settings.workdays.filter((day) => day !== iso) : [...settings.workdays, iso].sort((a, b) => a - b);
@@ -2086,8 +2107,21 @@ window.__ModuleLoader__.load({
 					e("div", { style: S.cardTitle }, "作息"),
 					e(
 						Field,
-						{ label: "上班日" },
-						WEEKDAYS.map((iso) => e("button", { key: iso, style: settings.workdays.includes(iso) ? S.chipOn : S.chip, onClick: () => toggleDay(iso) }, WEEKDAY_LABELS[iso]))
+						{ label: "上班日", hint: "至少要留一个上班日；取消最后一个不会生效。" },
+						WEEKDAYS.map((iso) => {
+							const on = settings.workdays.includes(iso);
+							const last = on && settings.workdays.length === 1;
+							return e(
+								"button",
+								{
+									key: iso,
+									style: last ? { ...S.chipOn, cursor: "default", opacity: 0.8 } : on ? S.chipOn : S.chip,
+									title: last ? "至少要留一个上班日" : undefined,
+									onClick: () => toggleDay(iso)
+								},
+								WEEKDAY_LABELS[iso]
+							);
+						})
 					),
 					e(Field, { label: "上班 / 下班时间" }, timeInput(settings.dayStart, (value) => updateSettings({ dayStart: value })), e("span", { style: S.hint }, "到"), timeInput(settings.dayEnd, (value) => updateSettings({ dayEnd: value }))),
 					e(
@@ -2124,7 +2158,7 @@ window.__ModuleLoader__.load({
 							def.extra === "minutes"
 								? e(Field, { label: "每次活动时长" }, e(NumberField, { value: config.minutes ?? 3, min: 1, max: 30, onChange: (value) => updateKind(def.id, { minutes: value }), suffix: "分钟" }))
 								: null,
-							e(Field, { label: "每日目标" }, e(NumberField, { value: config.target, min: 1, max: 96, onChange: (value) => updateKind(def.id, { target: value }), suffix: def.unit }))
+							e(Field, { label: "每日目标" }, e(NumberField, { value: config.target, min: 1, max: def.maxTarget, onChange: (value) => updateKind(def.id, { target: value }), suffix: def.unit }))
 						);
 					})
 				),
@@ -2175,9 +2209,22 @@ window.__ModuleLoader__.load({
 						"div",
 						{ style: S.rowWrap },
 						e("span", { style: S.hint }, permissionText),
-						permission === "default" || permission === "prompt" ? e("button", { style: S.btnSmall, onClick: () => requestNotificationPermission() }, "请求权限") : null,
-						e("button", { style: S.btnSmall, onClick: () => notifySystem("water", Date.now()) }, "测试系统通知"),
-						e("button", { style: S.btnSmall, onClick: () => playBeep("water") }, "测试提示音")
+						permission === "default"
+							? e(
+									"button",
+									{
+										style: S.btnSmall,
+										onClick: () => {
+											setNotifyNote("");
+											requestNotificationPermission().then(() => setNotifyNote(""));
+										}
+									},
+									"请求权限"
+								)
+							: null,
+						e("button", { style: S.btnSmall, onClick: () => setNotifyNote(testNotify()) }, "测试系统通知"),
+						e("button", { style: S.btnSmall, onClick: () => { setNotifyNote(""); playBeep("water"); } }, "测试提示音"),
+						notifyNote ? e("span", { style: S.hint }, notifyNote) : null
 					)
 				),
 								e(
@@ -2326,6 +2373,9 @@ window.__ModuleLoader__.load({
 							"button",
 							{
 								style: active ? S.btnPrimary : { ...S.btnPrimary, opacity: 0.5, cursor: "default" },
+								// 没有当前方案时真的禁用（不只是看起来灰）：点上去没反应会让人以为插件坏了。
+								disabled: !active,
+								title: active ? "用当前设置覆盖这份方案记下的配置" : "还没有当前方案：先「应用」一份，或在下面「照当前设置新建」",
 								onClick: () =>
 									active &&
 									runConfirm(
@@ -2339,6 +2389,8 @@ window.__ModuleLoader__.load({
 							"button",
 							{
 								style: active ? S.btnSoft : { ...S.btnSoft, opacity: 0.5, cursor: "default" },
+								disabled: !active,
+								title: active ? "把当前作息、间隔、目标退回这份方案记下的样子" : "还没有当前方案：先「应用」一份",
 								onClick: () =>
 									active &&
 									runConfirm(
@@ -2648,6 +2700,7 @@ window.__ModuleLoader__.load({
 		}
 
 		function HealthPanelPage() {
+			notePaint("main");
 			const state = useAppState();
 			const [tab, setTab] = useState("today");
 			const settings = state.settings;
@@ -2676,7 +2729,11 @@ window.__ModuleLoader__.load({
 					{ style: S.panelBody },
 					tab === "today" ? e(TodayView) : tab === "report" ? e(ReportView) : tab === "settings" ? e(SettingsPane) : e(PlansView)
 				),
-				overlaySeatLive ? null : e(ReminderBanner)
+				overlaySeatLive ? null : e(ReminderBanner),
+				// 弹窗得有个落脚点：浮层席位不可用时（外壳没声明 shell.overlay），
+				// 方案页的「编辑」会点了没反应，所以这里再挂一份。两处同时最多存在一份
+				// （overlaySeatLive 为真时只挂浮层那份，不会出现两个弹窗）。
+				overlaySeatLive ? null : e(PlanEditorDialog)
 			);
 		}
 		//#endregion
@@ -2842,7 +2899,8 @@ window.__ModuleLoader__.load({
 			if (!current) return false;
 			const next = { ...(patch ?? {}) };
 			if (typeof next.name === "string") {
-				current.name = next.name.slice(0, 40);
+				// 上限和落库时的 planNameOf 一致：别让用户先打到 40 个字、保存时再被无声截到 24 个。
+				current.name = next.name.slice(0, PLAN_NAME_MAX);
 				delete next.name;
 			}
 			if (Object.keys(next).length > 0) current.draft = normalizeSettings({ ...current.draft, ...next });
@@ -2936,8 +2994,21 @@ window.__ModuleLoader__.load({
 					e(Field, { label: "方案名字" }, e("input", { style: { ...S.input, width: 220 }, value: current.name, onChange: (ev) => patchPlanEditor({ name: ev.target.value }) })),
 					e(
 						Field,
-						{ label: "上班日" },
-						WEEKDAYS.map((iso) => e("button", { key: iso, style: draft.workdays.includes(iso) ? S.chipOn : S.chip, onClick: () => toggleDay(iso) }, WEEKDAY_LABELS[iso]))
+						{ label: "上班日", hint: "至少要留一个上班日；取消最后一个不会生效。" },
+						WEEKDAYS.map((iso) => {
+							const on = draft.workdays.includes(iso);
+							const last = on && draft.workdays.length === 1;
+							return e(
+								"button",
+								{
+									key: iso,
+									style: last ? { ...S.chipOn, cursor: "default", opacity: 0.8 } : on ? S.chipOn : S.chip,
+									title: last ? "至少要留一个上班日" : undefined,
+									onClick: () => toggleDay(iso)
+								},
+								WEEKDAY_LABELS[iso]
+							);
+						})
 					),
 					e(Field, { label: "上班 / 下班时间" }, timeInput(draft.dayStart, (value) => patchPlanEditor({ dayStart: value })), e("span", { style: S.hint }, "到"), timeInput(draft.dayEnd, (value) => patchPlanEditor({ dayEnd: value }))),
 					e(
@@ -2962,7 +3033,7 @@ window.__ModuleLoader__.load({
 							def.extra === "minutes"
 								? e(Field, { label: "每次活动时长" }, e(NumberField, { value: config.minutes ?? 3, min: 1, max: 30, suffix: "分钟", onChange: (value) => patchPlanEditorKind(def.id, { minutes: value }) }))
 								: null,
-							e(Field, { label: "每日目标" }, e(NumberField, { value: config.target, min: 1, max: 96, suffix: def.unit, onChange: (value) => patchPlanEditorKind(def.id, { target: value }) }))
+							e(Field, { label: "每日目标" }, e(NumberField, { value: config.target, min: 1, max: def.maxTarget, suffix: def.unit, onChange: (value) => patchPlanEditorKind(def.id, { target: value }) }))
 						);
 					}),
 					e(
@@ -2971,7 +3042,10 @@ window.__ModuleLoader__.load({
 						e("div", { style: { fontSize: 12.5, fontWeight: 600, color: T.fg } }, "提醒方式"),
 						e(Field, { label: "系统通知" }, e(Toggle, { checked: draft.notify.system, onChange: (value) => patchPlanEditor({ notify: { ...draft.notify, system: value } }) })),
 						e(Field, { label: "应用内提示卡" }, e(Toggle, { checked: draft.notify.inApp, onChange: (value) => patchPlanEditor({ notify: { ...draft.notify, inApp: value } }) })),
-						e(Field, { label: "提示音" }, e(Toggle, { checked: draft.notify.sound, onChange: (value) => patchPlanEditor({ notify: { ...draft.notify, sound: value } }) }))
+						e(Field, { label: "提示音" }, e(Toggle, { checked: draft.notify.sound, onChange: (value) => patchPlanEditor({ notify: { ...draft.notify, sound: value } }) })),
+						// 音色 / 音量 / 全屏静音 / 免打扰也在方案快照里（方案=整套配置），但它们是「机器上的偏好」，
+						// 留在设置页改——这里说清楚，免得用户以为应用方案会绕过它们。
+						e("div", { style: { ...S.hint, marginTop: 4 } }, "音色、音量、全屏静音与免打扰也随方案保存；它们在本插件的设置页里调整，再「保存到方案」更新这份快照。")
 					),
 					e(
 						"div",
@@ -3088,7 +3162,7 @@ window.__ModuleLoader__.load({
 			paintedSeats.clear();
 			recordDiag({
 				applyAt: Date.now(),
-				version: "0.5.1",
+				version: "0.5.2",
 				inject: inject.slice(),
 				slotsInject: typeof ctx?.slots?.inject,
 				slotsRegister: typeof ctx?.slots?.register,
@@ -3162,6 +3236,11 @@ window.__ModuleLoader__.load({
 						},
 						"health-reminder: ui mounts"
 					);
+				} else {
+					// 席位服务都没有的话，插件一个入口都露不出来；这里至少留一条明确日志 + 诊断，
+					// 免得用户看到的只是「什么都没发生」。
+					console.warn("[health-reminder] 外壳没提供 slots.inject 服务，所有入口都不会出现。");
+					recordDiag({ seats: "unavailable", slotsInject: typeof ctx?.slots?.inject });
 				}
 			} catch (error) {
 				console.warn("[health-reminder] 席位注册失败:", error);
@@ -3240,6 +3319,7 @@ window.__ModuleLoader__.load({
 			TONE_IDS,
 			isFullscreenActive,
 			playBeep,
+			notifySystem,
 			announce,
 			commandContributions,
 			summaryText,
