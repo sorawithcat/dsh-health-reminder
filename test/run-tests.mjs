@@ -85,7 +85,7 @@ const mod = factory((specifier) => {
 const t = mod.__test;
 
 assert.equal(mod.name, "dsh-health-reminder");
-assert.deepEqual(mod.inject, ["slots", "locale", "layout"]);
+assert.deepEqual(mod.inject, ["slots", "layout"]);
 assert.equal(typeof mod.apply, "function");
 assert.ok(t, "插件必须导出 __test 供自测使用");
 //#endregion
@@ -159,24 +159,23 @@ check("normalizeSettings 补默认值并裁剪", () => {
 	assert.equal(t.normalizeSettings({ dayEnd: "25:00" }).dayEnd, "19:00");
 });
 
-check("isAllowed 只在上工时段的上班日放行", () => {
+check("inSchedule 只在上工时段的上班日放行（不看总开关）", () => {
 	const settings = DEFAULT();
-	assert.equal(t.isAllowed(settings, ms(1, 11, 0)), true, "周一 11:00 应放行");
-	assert.equal(t.isAllowed(settings, ms(6, 18, 59)), true, "周六 18:59 应放行");
-	assert.equal(t.isAllowed(settings, ms(7, 11, 0)), false, "周日不上班");
-	assert.equal(t.isAllowed(settings, ms(1, 12, 30)), false, "午休不放行");
-	assert.equal(t.isAllowed(settings, ms(1, 9, 59)), false, "上班前不放行");
-	assert.equal(t.isAllowed(settings, ms(1, 19, 0)), false, "下班点不放行");
-	assert.equal(t.isAllowed({ ...settings, enabled: false }, ms(1, 11, 0)), false, "总开关关闭");
+	assert.equal(t.inSchedule(settings, ms(1, 11, 0)), true, "周一 11:00 应放行");
+	assert.equal(t.inSchedule(settings, ms(6, 18, 59)), true, "周六 18:59 应放行");
+	assert.equal(t.inSchedule(settings, ms(7, 11, 0)), false, "周日不上班");
+	assert.equal(t.inSchedule(settings, ms(1, 12, 30)), false, "午休不放行");
+	assert.equal(t.inSchedule(settings, ms(1, 9, 59)), false, "上班前不放行");
+	assert.equal(t.inSchedule(settings, ms(1, 19, 0)), false, "下班点不放行");
+	assert.equal(t.inSchedule({ ...settings, enabled: false }, ms(1, 11, 0)), true, "总开关不归 inSchedule 管");
 });
 
-check("nextAllowedAt 跳过午休、夜间与休息日", () => {
+check("nextSlotAt 跳到下一个上班时段（午休、夜间与休息日都不算）", () => {
 	const settings = DEFAULT();
-	assert.equal(t.nextAllowedAt(settings, ms(1, 12, 30)), ms(1, 13, 0), "午休后是 13:00");
-	assert.equal(t.nextAllowedAt(settings, ms(7, 15, 0)), ms(8, 10, 0), "周日 15:00 → 周一 10:00");
-	assert.equal(t.nextAllowedAt(settings, ms(6, 23, 0)), ms(8, 10, 0), "周六深夜 → 周一 10:00");
-	assert.equal(t.nextAllowedAt(settings, ms(1, 9, 0)), ms(1, 10, 0));
-	assert.equal(t.nextAllowedAt(settings, ms(1, 11, 20)), ms(1, 11, 20), "已在窗口内就原样返回");
+	assert.equal(t.nextSlotAt(settings, "water", ms(1, 12, 30)), ms(1, 13, 0), "午休后是 13:00");
+	assert.equal(t.nextSlotAt(settings, "water", ms(1, 9, 0)), ms(1, 11, 0), "上班前 → 当天第一个点");
+	assert.equal(t.nextSlotAt(settings, "water", ms(7, 15, 0)), ms(8, 11, 0), "周日 15:00 → 下周一第一个点");
+	assert.equal(t.nextSlotAt(settings, "water", ms(6, 23, 0)), ms(8, 11, 0), "周六深夜 → 下周一第一个点");
 });
 
 check("windowMinutes / estimate 的容量计算", () => {
@@ -196,7 +195,6 @@ check("固定时刻表：daySlots 从上班时间起按间隔排队，跳过午�
 	const slots = t.daySlots(settings, "water", 0, ms(1, 8, 0));
 	assert.deepEqual(slots.map((x) => new Date(x).getHours()), [11, 13, 14, 15, 16, 17, 18], "10:00 + 每 60 分钟，12:00 在午休里被丢掉");
 	assert.equal(t.inSchedule(settings, slots[0]), true, "inSchedule 不看总开关");
-	assert.equal(t.isAllowed({ ...settings, enabled: false }, slots[0]), false, "isAllowed 仍受总开关约束");
 	const stand = t.daySlots(settings, "stand", 0, ms(1, 8, 0));
 	assert.deepEqual(
 		stand.map((x) => new Date(x).getHours() * 60 + new Date(x).getMinutes()),
@@ -738,7 +736,7 @@ check("applyPlan 把方案写进设置并重排下一次", () => {
 	assert.equal(state.settings.enabled, true);
 	const at = t.nextAtFor(state, "water", Date.now());
 	assert.equal(typeof at, "number", "改完设置后应能派生出下一次提醒");
-	assert.equal(t.isAllowed(state.settings, at), true, "派生出来的时间必须落在允许时段内");
+	assert.equal(t.inSchedule(state.settings, at), true, "派生出来的时间必须落在允许时段内");
 });
 
 check("applyPlan 原样套用方案：方案记的是「关着提醒」，应用它不该把总开关打开", () => {

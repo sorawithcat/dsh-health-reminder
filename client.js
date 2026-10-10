@@ -333,50 +333,6 @@ window.__ModuleLoader__.load({
 			return true;
 		}
 
-		/** 该时刻是否允许提醒（总开关开启 + 落在作息里）。 */
-		function isAllowed(settings, ms) {
-			return settings.enabled === true && inSchedule(settings, ms);
-		}
-
-		/** 从 ms 起（含）第一个允许提醒的时刻。 */
-		function nextAllowedAt(settings, ms) {
-			let t = ms;
-			for (let i = 0; i < 40; i += 1) {
-				const d = new Date(t);
-				if (!settings.workdays.includes(isoDay(d))) {
-					t = atTime(d, settings.dayStart, 1);
-					continue;
-				}
-				const mins = d.getHours() * 60 + d.getMinutes();
-				const start = parseHM(settings.dayStart) ?? 600;
-				const end = parseHM(settings.dayEnd) ?? 1140;
-				if (mins < start) {
-					t = atTime(d, settings.dayStart, 0);
-					continue;
-				}
-				if (mins >= end) {
-					t = atTime(d, settings.dayStart, 1);
-					continue;
-				}
-				if (settings.lunchEnabled && inWindow(mins, parseHM(settings.lunchStart) ?? 720, parseHM(settings.lunchEnd) ?? 780)) {
-					t = atTime(d, settings.lunchEnd, 0);
-					continue;
-				}
-				if (settings.quiet.enabled) {
-					const qs = parseHM(settings.quiet.start) ?? 1320;
-					const qe = parseHM(settings.quiet.end) ?? 480;
-					if (inWindow(mins, qs, qe)) {
-						t = mins < qe && qs > qe ? atTime(d, settings.quiet.end, 0) : atTime(d, settings.dayStart, 1);
-						continue;
-					}
-				}
-				const snapped = new Date(d);
-				snapped.setSeconds(0, 0);
-				return snapped.getTime();
-			}
-			return t;
-		}
-
 		/** 一天里可用于提醒的分钟数。 */
 		function windowMinutes(settings) {
 			const start = parseHM(settings.dayStart) ?? 600;
@@ -1408,16 +1364,6 @@ window.__ModuleLoader__.load({
 			statValue: { fontSize: 20, fontWeight: 600, color: T.fg, fontVariantNumeric: "tabular-nums", lineHeight: 1.25, marginTop: 2 },
 			statNote: { fontSize: 11, color: T.fg3, marginTop: 2 },
 			empty: { color: T.caption, fontSize: 12.5, padding: "6px 0" },
-			barWrap: { display: "flex", alignItems: "flex-end", gap: 8, marginTop: 8 },
-			barCol: { flex: "1 1 0", display: "flex", flexDirection: "column", alignItems: "center", gap: 4 },
-			barTrack: { display: "flex", alignItems: "flex-end", gap: 2, height: 44 },
-			bar: { width: 9, borderRadius: 3, minHeight: 2 },
-			barLabel: { fontSize: 11, color: T.fg3 },
-			chatList: { maxHeight: 420, overflowY: "auto", paddingRight: 4 },
-			bubble: { borderRadius: 12, padding: "9px 12px", marginBottom: 8, maxWidth: "92%", whiteSpace: "pre-wrap", fontSize: 13, wordBreak: "break-word" },
-			bubbleAgent: { background: T.hover, color: T.fg },
-			bubbleUser: { background: T.brand, color: T.onBrand, marginLeft: "auto" },
-			textarea: { flex: "1 1 auto", minHeight: 58, resize: "vertical", background: "transparent", color: T.fg, border: `1px solid ${T.lineStrong}`, borderRadius: 10, padding: 8, fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" },
 			banner: { position: "fixed", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 2147483000, width: 380, maxWidth: "92vw", background: T.card, border: `1px solid ${T.lineStrong}`, borderRadius: 14, boxShadow: "0 12px 32px rgba(0,0,0,0.28)", padding: 14, color: T.fg, fontSize: 13, boxSizing: "border-box", colorScheme: "inherit" },
 			logItem: { display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, color: T.fg2, padding: "4px 0" },
 			// 面板页（main 席位）：外壳给的是定高容器，自己必须撑满并让正文滚动
@@ -2864,7 +2810,7 @@ window.__ModuleLoader__.load({
 			}
 		}
 
-		/** 当前编辑中的草稿（拷贝一份，外部改动不会串进弹窗）；没在编辑时为 null。 */
+		/** 当前编辑中的草稿（拷贝一份，外部改动不会串进弹窗）；没在编辑时为 null。自测用，生产路径由弹窗自己订阅同一份状态。 */
 		function planEditorOf() {
 			const current = planEditState.current;
 			return current ? { id: current.id, name: current.name, active: current.active, draft: clone(current.draft) } : null;
@@ -3150,8 +3096,8 @@ window.__ModuleLoader__.load({
 
 		//#region 插件导出
 		const name = "dsh-health-reminder";
-		/** 需要的客户端服务：席位注册（slots）、本地化（locale）、面板切换（layout）。 */
-		const inject = ["slots", "locale", "layout"];
+		/** 需要的客户端服务：席位注册（slots）、面板切换（layout）。 */
+		const inject = ["slots", "layout"];
 
 		let clientCtx = null;
 		/**
@@ -3202,7 +3148,7 @@ window.__ModuleLoader__.load({
 			paintedSeats.clear();
 			resetDiag({
 				applyAt: Date.now(),
-				version: "0.5.2",
+				version: "0.5.3",
 				inject: inject.slice(),
 				slotsInject: typeof ctx?.slots?.inject,
 				slotsRegister: typeof ctx?.slots?.register,
@@ -3374,8 +3320,6 @@ window.__ModuleLoader__.load({
 			inWindow,
 			normalizeSettings,
 			inSchedule,
-			isAllowed,
-			nextAllowedAt,
 			daySlots,
 			nextSlotAt,
 			lastSlotAt,
