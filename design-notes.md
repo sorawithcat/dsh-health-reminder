@@ -82,7 +82,7 @@
 
 ## 离线自测
 `test/run-tests.mjs` 伪造 `window.__ModuleLoader__`（拿着 `client.js` 源码 `new Function` 跑）与 localStorage，
-再给 `index.js` 一个假的 `ctx`，因此不需要 DSH、不需要浏览器就能跑（69 项）。
+再给 `index.js` 一个假的 `ctx`，因此不需要 DSH、不需要浏览器就能跑（70 项）。
 
 ## 刻意不做
 - **不注册键盘快捷键**：DSH 的快捷键服务里不会出现这个插件，入口只有底部状态行的按钮、面板与设置页。

@@ -1313,7 +1313,7 @@ check("清单：客户端模块必须 immediately 加载，并声明会用到的
 		assert.ok(manifest.dsh.client.inject.includes(id), `dsh.client.inject 应声明 ${id}`);
 	}
 	const clientSrc = fs.readFileSync(path.join(import.meta.dirname, "..", "client.js"), "utf8");
-	const diagVersion = clientSrc.match(/recordDiag\(\{\s*applyAt: Date\.now\(\),\s*version: "([^"]+)"/)?.[1];
+	const diagVersion = clientSrc.match(/(?:resetDiag|recordDiag)\(\{\s*applyAt: Date\.now\(\),\s*version: "([^"]+)"/)?.[1];
 	assert.ok(diagVersion, "client.js 的 apply 里应记录诊断版本号");
 	assert.equal(manifest.version, diagVersion, "清单与诊断里的版本号要一致");
 	assert.ok(fs.existsSync(path.join(import.meta.dirname, "..", "icon.svg")), "清单里引用的 icon.svg 必须存在");
@@ -1690,6 +1690,38 @@ check("诊断通道：席位注册全过程写进 localStorage，供现场排查
 	const dock = registrations.filter((item) => item.slotName === "conversation.composer.dock").at(-1).out.component;
 	renderRoot(dock, {});
 	assert.equal(typeof t.readDiag().seats["conversation.composer.dock"].paintedAt, "number");
+});
+
+check("诊断只反映这一次安装：不带上一轮的错误，报错记成一行人话", () => {
+	// 假装上一次安装留下了一条失败记录：新一轮 apply 之后不该再看到它。
+	localStorage.setItem(
+		"dsh-health-reminder/diag.v1",
+		JSON.stringify({
+			applyAt: 1,
+			version: "0.0.1",
+			seats: { main: { seat: "main", declaredAt: 1, injectedAt: 1 } },
+			errors: [{ at: 1, seat: "shell.overlay", message: "上一次安装的旧错误" }]
+		})
+	);
+	mod.apply(fakeCtx);
+	let diag = t.readDiag();
+	assert.deepEqual(diag.errors, [], "新一次 apply 不该带着上一轮的 errors");
+	assert.notEqual(diag.seats.main?.declaredAt, 1, "席位记录也应该是这一轮的");
+
+	// 席位注册失败时，记的必须是能读的一行字，而不是 JSON 化之后的空对象。
+	mod.apply({
+		effect: () => {},
+		get: () => null,
+		slots: {
+			inject: () => {
+				throw new Error("席位没装");
+			}
+		}
+	});
+	diag = t.readDiag();
+	assert.equal(diag.errors.length, 5, "五个席位各记一条失败");
+	assert.match(diag.errors[0].message, /席位没装/, "错误列表里要有原始信息");
+	assert.equal(diag.seats.main.error, "席位没装", "席位条目里的 error 也要是人话（不是 {}）");
 });
 //#endregion
 

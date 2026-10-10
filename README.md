@@ -146,7 +146,7 @@ node test/run-tests.mjs
 （点按钮 → 弹确认 → 取消/确认两条路径；方案页的新建 / 应用 / 重命名 / 删除 / 编辑弹窗；报告页签的导出 / 导入入口；
 浮层席位缺席时方案编辑弹窗改挂在面板里；「测试系统通知」在没有权限 / 环境不支持时会说出原因）。
 
-当前 **69/69 通过**（`node test/run-tests.mjs`，不需要 DSH）。
+当前 **70/70 通过**（`node test/run-tests.mjs`，不需要 DSH）。
 
 ## 文件
 
@@ -159,7 +159,7 @@ dsh-health-reminder/
 ├─ icon.svg          侧边栏 / 面板入口的图标
 ├─ design-notes.md   设计说明：配置模型、判定逻辑、多套方案、文案池
 ├─ LICENSE           BSD-3-Clause
-└─ test/run-tests.mjs 离线自测（69 项）
+└─ test/run-tests.mjs 离线自测（70 项）
 ```
 
 ## 已知限制

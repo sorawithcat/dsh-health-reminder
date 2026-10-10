@@ -3079,7 +3079,12 @@ window.__ModuleLoader__.load({
 				const prev = raw ? JSON.parse(raw) : {};
 				const seats = { ...(prev.seats ?? {}) };
 				const seatName = patch.seat;
-				if (seatName) seats[seatName] = { ...(seats[seatName] ?? {}), ...patch };
+				if (seatName) {
+					const entry = { ...(seats[seatName] ?? {}), ...patch };
+					// Error 直接 JSON 化会变成 {}，席位里只留一行人话。
+					if (patch.error !== undefined) entry.error = patch.error === null ? null : String(patch.error?.message ?? patch.error);
+					seats[seatName] = entry;
+				}
 				const errors = Array.isArray(prev.errors) ? prev.errors.slice(-7) : [];
 				if (patch.error !== undefined && patch.error !== null) {
 					errors.push({ at: Date.now(), seat: seatName ?? null, message: String(patch.error?.message ?? patch.error) });
@@ -3087,6 +3092,18 @@ window.__ModuleLoader__.load({
 				const next = { ...prev, ...patch, seats, errors, updatedAt: Date.now() };
 				delete next.error;
 				localStorage.setItem(DIAG_KEY, JSON.stringify(next));
+			} catch {
+				/* 诊断失败不影响功能 */
+			}
+		}
+
+		/**
+		 * 新一次 apply 的起点：把上一轮的席位与报错清掉。
+		 * 否则用户排查时看到的可能是几小时前那次失败留下的红字，越查越糊涂。
+		 */
+		function resetDiag(patch) {
+			try {
+				localStorage.setItem(DIAG_KEY, JSON.stringify({ ...patch, seats: {}, errors: [], updatedAt: Date.now() }));
 			} catch {
 				/* 诊断失败不影响功能 */
 			}
@@ -3183,7 +3200,7 @@ window.__ModuleLoader__.load({
 		function apply(ctx) {
 			clientCtx = ctx;
 			paintedSeats.clear();
-			recordDiag({
+			resetDiag({
 				applyAt: Date.now(),
 				version: "0.5.2",
 				inject: inject.slice(),
