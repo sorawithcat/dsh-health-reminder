@@ -2158,7 +2158,7 @@ window.__ModuleLoader__.load({
 					e(Field, { label: "全屏时静音" }, e(Toggle, { checked: settings.notify.muteFullscreen, onChange: (value) => updateSettings({ notify: { ...settings.notify, muteFullscreen: value } }) })),
 					e(
 						FieldBlock,
-						{ label: "全局快捷键", hint: "可在 DSH 的快捷键设置里改键；Linux 网页端允许的组合很少，需要自己绑定。" },
+						{ label: "快捷操作", hint: "面板打开时的几个常用动作，放这里方便直接点。" },
 						e("button", { style: S.btnSmall, onClick: () => { setDockOpen(true); selectPanel(); } }, "打开面板"),
 						e("button", { style: S.btnSmall, onClick: () => completeKind("water", Date.now()) }, "记一杯水"),
 						e("button", { style: S.btnSmall, onClick: () => completeKind("stand", Date.now()) }, "记一次起身"),
@@ -3027,70 +3027,6 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 
-		//#region 全局快捷键
-		/**
-		 * 注册进 ctx.shortcuts 的命令（用户可以在 DSH 的快捷键设置里改键）。
-		 * 只给 Windows / macOS 的桌面端与网页端默认键：Linux 网页端允许的组合很少，
-		 * 留给用户自己绑定。每个命令单独 try/catch，一个冲突不会连累其它命令。
-		 */
-		function shortcutCommands() {
-			const defaults = (code) => ({
-				"desktop:macos": { code, modifiers: ["primary", "shift"] },
-				"desktop:windows": { code, modifiers: ["primary", "shift"] },
-				"web:macos": { code, modifiers: ["primary", "shift"] },
-				"web:windows": { code, modifiers: ["primary", "shift"] }
-			});
-			const openPanel = () => {
-				setDockOpen(true);
-				selectPanel();
-			};
-			return [
-				{
-					id: "health-reminder.panel",
-					label: () => "健康提醒：打开快捷面板",
-					aliases: ["health", "健康提醒", "健康面板"],
-					defaults: defaults("KeyH"),
-					regions: ["page", "editable", "terminal"],
-					modals: [],
-					resolve: () => ({ status: "handled", run: openPanel })
-				},
-				{
-					id: "health-reminder.water",
-					label: () => "健康提醒：记一杯水",
-					aliases: ["water", "喝水"],
-					defaults: defaults("Digit1"),
-					regions: ["page", "editable"],
-					modals: [],
-					resolve: () => ({ status: "handled", run: () => completeKind("water", Date.now()) })
-				},
-				{
-					id: "health-reminder.stand",
-					label: () => "健康提醒：记一次起身",
-					aliases: ["stand", "起身"],
-					defaults: defaults("Digit2"),
-					regions: ["page", "editable"],
-					modals: [],
-					resolve: () => ({ status: "handled", run: () => completeKind("stand", Date.now()) })
-				},
-				{
-					id: "health-reminder.pause",
-					label: () => "健康提醒：暂停 / 恢复提醒",
-					aliases: ["pause", "暂停提醒"],
-					defaults: defaults("Digit3"),
-					regions: ["page", "editable"],
-					modals: [],
-					resolve: () => ({
-						status: "handled",
-						run: () => {
-							const state = store.get();
-							updateSettings({ enabled: state.settings.enabled !== true });
-						}
-					})
-				}
-			];
-		}
-		//#endregion
-
 		//#region 会话命令
 		/**
 		 * 贡献给 `/` 命令菜单的命令。只有一条：打开面板的今日小结
@@ -3152,7 +3088,7 @@ window.__ModuleLoader__.load({
 			paintedSeats.clear();
 			recordDiag({
 				applyAt: Date.now(),
-				version: "0.5.0",
+				version: "0.5.1",
 				inject: inject.slice(),
 				slotsInject: typeof ctx?.slots?.inject,
 				slotsRegister: typeof ctx?.slots?.register,
@@ -3245,37 +3181,6 @@ window.__ModuleLoader__.load({
 
 			try {
 				ctx.effect(() => {
-					const shortcuts = ctx?.shortcuts;
-					if (!shortcuts || typeof shortcuts.register !== "function") {
-						recordDiag({ shortcuts: "unavailable" });
-						return () => {};
-					}
-					const disposers = [];
-					for (const command of shortcutCommands()) {
-						try {
-							disposers.push(shortcuts.register(command));
-							recordDiag({ shortcut: command.id, registeredAt: Date.now() });
-						} catch (error) {
-							console.warn(`[health-reminder] 注册快捷键 ${command.id} 失败:`, error);
-							recordDiag({ shortcut: command.id, error });
-						}
-					}
-					return () => {
-						for (const dispose of disposers.splice(0)) {
-							try {
-								dispose();
-							} catch (error) {
-								console.warn("[health-reminder] 释放快捷键失败:", error);
-							}
-						}
-					};
-				}, "health-reminder: shortcuts");
-			} catch (error) {
-				console.warn("[health-reminder] 快捷键注册失败:", error);
-			}
-
-			try {
-				ctx.effect(() => {
 					const commandUi = ctx?.commandUi;
 					if (!commandUi || typeof commandUi.register !== "function") {
 						recordDiag({ commands: "unavailable" });
@@ -3336,7 +3241,6 @@ window.__ModuleLoader__.load({
 			isFullscreenActive,
 			playBeep,
 			announce,
-			shortcutCommands,
 			commandContributions,
 			summaryText,
 			recordCount,

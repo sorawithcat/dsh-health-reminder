@@ -866,19 +866,12 @@ check("loadState 会用默认值补齐缺字段", () => {
 //#region 7. 席位注册与界面冒烟
 const registrations = [];
 const effectFns = [];
-const shortcutRegistrations = [];
 const commandRegistrations = [];
 const fakeCtx = {
 	get: () => null,
 	effect(fn) {
 		effectFns.push(fn);
 		return () => {};
-	},
-	shortcuts: {
-		register(command) {
-			shortcutRegistrations.push(command);
-			return () => {};
-		}
 	},
 	commandUi: {
 		register(contribution) {
@@ -911,28 +904,11 @@ check("apply 注册五个席位并启动调度", () => {
 	assert.equal(registrations.find((item) => item.slotName === "main").out.meta.key, t.PANEL_ID);
 	assert.equal(registrations.find((item) => item.slotName === "conversation.composer.dock").out.meta.id, `${t.PANEL_ID}-dock`);
 	assert.equal(registrations.find((item) => item.slotName === "settings.section").out.meta.id, t.PANEL_ID);
-	assert.equal(effectFns.length, 4, "应注册「界面挂载」「调度器」「全局快捷键」「会话命令」四个 effect");
+	assert.equal(effectFns.length, 3, "应注册「界面挂载」「调度器」「会话命令」三个 effect");
 	const stopScheduler = effectFns[1]();
 	assert.equal(typeof stopScheduler, "function");
 	stopScheduler();
-	const stopShortcuts = effectFns[2]();
-	assert.equal(typeof stopShortcuts, "function");
-	assert.equal(shortcutRegistrations.length, 4, "应注册四条全局快捷键");
-	for (const command of shortcutRegistrations) {
-		assert.match(command.id, /^health-reminder\./);
-		assert.equal(typeof command.label, "function");
-		assert.equal(typeof command.resolve, "function");
-		assert.ok(command.defaults && typeof command.defaults === "object");
-	}
-	assert.deepEqual(
-		shortcutRegistrations.map((command) => command.id).sort(),
-		["health-reminder.panel", "health-reminder.pause", "health-reminder.stand", "health-reminder.water"]
-	);
-	const resolved = shortcutRegistrations.find((command) => command.id === "health-reminder.panel").resolve({});
-	assert.equal(resolved.status, "handled");
-	assert.equal(typeof resolved.run, "function", "resolve 必须给出可执行动作");
-	stopShortcuts();
-	const stopCommands = effectFns[3]();
+	const stopCommands = effectFns[2]();
 	assert.equal(typeof stopCommands, "function");
 	assert.equal(commandRegistrations.length, 1, "应贡献一条会话命令");
 	assert.equal(commandRegistrations[0].name, "health");
@@ -941,41 +917,6 @@ check("apply 注册五个席位并启动调度", () => {
 	const stopUi = effectFns[0]();
 	assert.equal(typeof stopUi, "function");
 	stopUi();
-});
-
-check("全局快捷键：默认键合法、不重复，动作能落到状态上", () => {
-	resetStore();
-	const commands = t.shortcutCommands();
-	assert.equal(commands.length, 4);
-	const allowedProfiles = ["desktop:macos", "desktop:windows", "web:macos", "web:windows"];
-	const seen = new Set();
-	for (const command of commands) {
-		for (const [profile, binding] of Object.entries(command.defaults)) {
-			assert.ok(allowedProfiles.includes(profile), `默认键的 profile 不受支持：${profile}`);
-			const keys = `${binding.modifiers ?? []}+${binding.code}`;
-			assert.ok(!seen.has(`${profile}/${keys}`), `默认键重复：${profile} ${keys}`);
-			seen.add(`${profile}/${keys}`);
-			assert.match(binding.code, /^(Key[A-Z]|Digit[0-9]|F[0-9]{1,2})$/);
-			for (const modifier of binding.modifiers ?? []) {
-				assert.ok(["primary", "primaryShift", "control", "alt", "shift"].includes(modifier), `不认识的修饰键：${modifier}`);
-			}
-		}
-	}
-	const openPanel = commands.find((command) => command.id === "health-reminder.panel");
-	assert.match(openPanel.label(), /健康提醒/);
-	assert.equal(openPanel.resolve({}).status, "handled");
-
-	// 快捷键动作必须真的能改状态：记一杯水 → 记录多一条；暂停 → enabled 取反。
-	const now = Date.now();
-	const key = t.dayKey(new Date(now));
-	const water = commands.find((command) => command.id === "health-reminder.water");
-	water.resolve({}).run();
-	assert.equal(t.recordCount(t.recordOn(t.store.get(), key), "water"), 1, "快捷键应记下一杯水");
-	const pause = commands.find((command) => command.id === "health-reminder.pause");
-	pause.resolve({}).run();
-	assert.equal(t.store.get().settings.enabled, false, "快捷键应暂停提醒");
-	pause.resolve({}).run();
-	assert.equal(t.store.get().settings.enabled, true, "再按一次应恢复");
 });
 
 check("设置：音量、音色与全屏静音会归一化，坏值回退", () => {
@@ -1071,11 +1012,11 @@ check("提示音：音色与音量来自设置，全屏静音时不发声", () =
 	}
 });
 
-check("界面：设置里有音量、音色、全屏静音与全局快捷键", () => {
+check("界面：设置里有音量、音色、全屏静音与快捷操作", () => {
 	resetStore();
 	const section = registrations.find((item) => item.slotName === "settings.section").out.component;
 	const tree = renderRoot(section, {});
-	for (const label of ["音量", "音色", "全屏时静音", "全局快捷键"]) {
+	for (const label of ["音量", "音色", "全屏时静音", "快捷操作"]) {
 		assert.match(tree.text, new RegExp(label), `设置里应有「${label}」`);
 	}
 	for (const label of ["清脆", "柔和", "双音铃"]) {
@@ -1329,7 +1270,7 @@ check("清单：客户端模块必须 immediately 加载，并声明会用到的
 	const manifest = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "..", "package.json"), "utf8"));
 	assert.equal(manifest.dsh.client.platform, "web");
 	assert.equal(manifest.dsh.client.immediately, true, "dsh.client.immediately 不是 true 时，启动器不会预取模块，入口就不会出现");
-	for (const id of ["@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-settings", "@deepseek-ai/dsh-client-shortcuts", "@deepseek-ai/dsh-client-ui-commands"]) {
+	for (const id of ["@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-settings", "@deepseek-ai/dsh-client-ui-commands"]) {
 		assert.ok(manifest.dsh.client.inject.includes(id), `dsh.client.inject 应声明 ${id}`);
 	}
 	const clientSrc = fs.readFileSync(path.join(import.meta.dirname, "..", "client.js"), "utf8");
