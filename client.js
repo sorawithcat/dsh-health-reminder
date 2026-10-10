@@ -2715,6 +2715,8 @@ window.__ModuleLoader__.load({
 				["settings", "设置"],
 				["plans", "方案"]
 			];
+			// 放在最后：hook 的调用位置要保持稳定，别动到上面那几个的下标。
+			const overlaySeatLive = useOverlaySeatLive();
 			return e(
 				"div",
 				{ style: S.panelPage, "data-dsh-plugin": "health-reminder" },
@@ -3135,8 +3137,29 @@ window.__ModuleLoader__.load({
 		const inject = ["slots", "locale", "layout"];
 
 		let clientCtx = null;
-		/** shell.overlay 席位是否可用（可用时全局横幅由它渲染，面板内不再重复）。 */
-		let overlaySeatLive = false;
+		/**
+		 * shell.overlay 席位是否可用（可用时全局横幅与弹窗由它渲染，面板内不再重复）。
+		 * 席位是外壳渲染时才回调的，可能在面板已经在显示之后才挂上——所以做成可订阅的小状态：
+		 * 翻转时通知面板重绘，否则面板会一直留着兜底横幅 / 多挂一份编辑弹窗。
+		 */
+		const overlaySeat = { live: false, listeners: new Set() };
+
+		function setOverlaySeatLive(value) {
+			const next = value === true;
+			if (overlaySeat.live === next) return;
+			overlaySeat.live = next;
+			for (const listener of [...overlaySeat.listeners]) listener();
+		}
+
+		function useOverlaySeatLive() {
+			const [, force] = useState(0);
+			useEffect(() => {
+				const listener = () => force((value) => value + 1);
+				overlaySeat.listeners.add(listener);
+				return () => overlaySeat.listeners.delete(listener);
+			}, []);
+			return overlaySeat.live;
+		}
 
 		/** 切到本插件的面板（通知被点击时用）。 */
 		function selectPanel() {
@@ -3213,7 +3236,7 @@ window.__ModuleLoader__.load({
 					try {
 						disposers.push(
 							slots.inject("shell.overlay", () => {
-								overlaySeatLive = true;
+								setOverlaySeatLive(true);
 								recordDiag({ seat: "shell.overlay", declaredAt: Date.now() });
 								return slots.register({ name: "shell.overlay", id: `${PANEL_ID}-banner`, order: 60 }, OverlaySeat);
 							})
@@ -3225,7 +3248,7 @@ window.__ModuleLoader__.load({
 					}
 					ctx.effect(
 						() => () => {
-							overlaySeatLive = false;
+							setOverlaySeatLive(false);
 							for (const dispose of disposers.splice(0)) {
 								try {
 									dispose();

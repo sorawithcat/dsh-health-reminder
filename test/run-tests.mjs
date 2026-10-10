@@ -1166,6 +1166,17 @@ function renderRoot(fn, props, keepState) {
 	return { text: texts.join(" | "), found, elements };
 }
 
+/**
+ * 直接调用一个组件、只拿它返回的那棵树（不移交子树）。
+ * 用于检查根节点结构与样式；hook 游标要和 renderRoot 一样先摆好，
+ * 否则会撞上别的组件留下的位置（`useState` 按「组件名#序号」取值）。
+ */
+function renderDirect(fn, props) {
+	componentKey = fn.name || "anonymous";
+	hooks.cursor = 0;
+	return fn(props ?? {});
+}
+
 /** 把元素的 children 拼成一行文本，便于按按钮上的字找按钮。 */
 function flatText(child) {
 	if (child === null || child === undefined || typeof child === "boolean") return "";
@@ -1652,7 +1663,7 @@ check("面板可滚动：正文自己滚（外壳给的是定高容器）", () =
 
 	resetStore();
 	const panel = registrations.find((item) => item.slotName === "main").out.component;
-	const root = panel({});
+	const root = renderDirect(panel, {});
 	assert.equal(root.props.style, styles.panelPage, "面板根节点用的是 panelPage 布局");
 	const body = (root.props.children ?? []).find((child) => child?.props?.style === styles.panelBody);
 	assert.ok(body, "页签内容必须包在 panelBody 里");
