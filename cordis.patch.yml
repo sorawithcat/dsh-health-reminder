@@ -1,0 +1,5 @@
+# 本插件的组合层：向 profile 的名录插入一行插件条目。
+# 由 package.json 的 dsh.bundle.patch 声明，安装后随 profile 一起加载。
+- insert:
+    - id: ui-health-reminder
+      name: dsh-health-reminder
