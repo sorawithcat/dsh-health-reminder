@@ -1,7 +1,7 @@
 {
   "name": "dsh-health-reminder",
   "version": "0.5.3",
-  "description": "健康提醒插件：按你自定义的作息定时提醒喝水、起身、护眼和拉伸，带每日/每周统计，以及多套可随时切换的提醒方案。",
+  "description": "健康提醒插件：按你自定义的作息定时提醒喝水、起身、护眼和拉伸，带每日与近 7/30 天统计，以及多套可随时切换的提醒方案。",
   "icon": "icon.svg",
   "type": "module",
   "main": "./index.js",
